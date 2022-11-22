@@ -1,0 +1,828 @@
+---
+sidebar: sidebar
+permalink: get-started/install_acc.html
+keywords: astra installation, install astra control center, how to install astra control, deploy, download from netapp support
+summary: To install Astra Control Center after addressing some environmental prerequisites, you'll download the bundle and install following the steps described.
+---
+
+= Install Astra Control Center using the standard process
+:hardbreaks:
+:icons: font
+:imagesdir: ../media/get-started/
+
+To install Astra Control Center, download the installation bundle from the NetApp Support Site and perform the following steps to install Astra Control Center Operator and Astra Control Center in your environment. You can use this procedure to install Astra Control Center in internet-connected or air-gapped environments.
+
+For Red Hat OpenShift environments, you can use an link:../get-started/acc_operatorhub_install.html[alternative procedure] to install Astra Control Center using OpenShift OperatorHub.
+
+.What you'll need
+* link:requirements.html[Before you begin installation, prepare your environment for Astra Control Center deployment].
+* If you have configured or want to configure pod security policies in your environment, familiarize yourself with pod security policies and how they affect Astra Control Center installation. See link:understand-psp-restrictions.html[Understand pod security policy restrictions].
+* Ensure all cluster operators are in a healthy state and available.
++
+[source,sh]
+----
+kubectl get clusteroperators
+----
+
+* Ensure all API services are in a healthy state and available:
++
+[source,sh]
+----
+kubectl get apiservices
+----
+
+* Ensure the Astra FQDN you plan to use is routable to this cluster. This means that you either have a DNS entry in your internal DNS server or you are using a core URL route that is already registered.
+* If a cert-manager already exists in the cluster, you need to perform some link:../get-started/cert-manager-prereqs.html[prerequisite steps] so that Astra Control Center does not install its own cert-manager.
+
+.About this task
+The Astra Control Center installation process does the following:
+
+* Installs the Astra components into the `netapp-acc` (or custom-named) namespace.
+* Creates a default account.
+* Establishes a default administrative user email address and default one-time password. This user is assigned the Owner role in the system that is needed for first time login to the UI.
+* Helps you determine that all Astra Control Center pods are running.
+* Installs the Astra UI.
+//VMware ADS EAP review
+
+IMPORTANT: (Applies to the Astra Data Store Early Access Program (EAP) release only) If you intend to manage Astra Data Store using Astra Control Center and enable VMware workflows, deploy Astra Control Center only on the `pcloud` namespace and not on the `netapp-acc` namespace or a custom namespace described in the steps of this procedure.
+
+IMPORTANT: Do not execute the following command during the entirety of the installation process to avoid deleting all Astra Control Center pods: `kubectl delete -f astra_control_center_operator_deploy.yaml`
+
+NOTE: If you are using Red Hat’s Podman instead of Docker Engine, Podman commands can be used in place of Docker commands.
+
+.Steps
+
+To install Astra Control Center, do the following steps:
+
+* <<Download and unpack the Astra Control Center bundle>>
+* <<Install the NetApp Astra kubectl plugin>>
+* <<Add the images to your local registry>>
+* <<Set up namespace and secret for registries with auth requirements>>
+* <<Install the Astra Control Center operator>>
+* <<Configure Astra Control Center>>
+* <<Complete Astra Control Center and operator installation>>
+* <<Verify system status>>
+* <<Set up ingress for load balancing>>
+* <<Log in to the Astra Control Center UI>>
+
+== Download and unpack the Astra Control Center bundle
+
+. Download the Astra Control Center bundle (`astra-control-center-[version].tar.gz`) from the https://mysupport.netapp.com/site/products/all/details/astra-control-center/downloads-tab[NetApp Support Site^].
+. Download the zip of Astra Control Center certificates and keys from the https://mysupport.netapp.com/site/products/all/details/astra-control-center/downloads-tab[NetApp Support Site^].
+. (Optional) Use the following command to verify the signature of the bundle:
++
+[source,sh]
+----
+openssl dgst -sha256 -verify AstraControlCenter-public.pub -signature astra-control-center-[version].tar.gz.sig astra-control-center-[version].tar.gz
+----
+. Extract the images:
++
+[source,sh]
+----
+tar -vxzf astra-control-center-[version].tar.gz
+----
+
+== Install the NetApp Astra kubectl plugin
+
+The NetApp Astra `kubectl` command line plugin saves time when performing common tasks associated with deploying and upgrading Astra Control Center.
+
+.What you'll need
+
+NetApp provides binaries for the plugin for different CPU architectures and operating systems. You need to know which CPU and operating system you have before you perform this task. On Linux and Mac operating systems, you can use the `uname -a` command to gather this information.
+
+.Steps
+
+. List the available NetApp Astra `kubectl` plugin binaries, and note the name of the file you need for your operating system and CPU architecture:
++
+[source,sh]
+----
+ls kubectl-astra/
+----
+. Copy the file to the same location as the standard `kubectl` utility. In this example, the `kubectl` utility is located in the `/usr/local/bin` directory. Replace `<binary-name>` with the name of the file you need:
++
+[source,sh]
+----
+cp kubectl-astra/<binary-name> /usr/local/bin/kubectl-astra
+----
+
+== Add the images to your local registry
+
+. Complete the appropriate step sequence for your container engine: 
+
+// start tabbed block for docker and podman approaches
+
+[role="tabbed-block"]
+====
+
+.Docker
+--
+. Change to the Astra directory:
++
+[source,sh]
+----
+cd acc
+----
+. [[substep_image_local_registry_push]]Push the package images in the Astra Control Center image directory to your local registry. Make the following substitutions before running the command:
++
+
+* Replace BUNDLE_FILE with the name of the Astra Control bundle file (for example, `acc.manifest.yaml`).
+* Replace MY_REGISTRY with the URL of the Docker repository.
+* Replace MY_REGISTRY_USER with the user name.
+* Replace MY_REGISTRY_TOKEN with an authorized token for the registry.
++
+[source,sh]
+----
+kubectl astra packages push-images -m BUNDLE_FILE -r MY_REGISTRY -u MY_REGISTRY_USER -p MY_REGISTRY_TOKEN
+----
+--
+
+.Podman
+--
+. Log in to your registry:
++
+[source,sh]
+----
+podman login [your_registry_path]
+----
+. Run the following script, making the <YOUR_REGISTRY> substitution as noted in the comments:
++
+[source,sh]
+----
+# You need to be at the root of the tarball.
+# You should see these files to confirm correct location:
+#   acc.manifest.yaml
+#   acc/
+
+# Replace <YOUR_REGISTRY> with your own registry (e.g registry.customer.com or registry.customer.com/testing, etc..)
+export REGISTRY=<YOUR_REGISTRY>
+export PACKAGENAME=acc
+export PACKAGEVERSION=22.08.1-26
+export DIRECTORYNAME=acc
+for astraImageFile in $(ls ${DIRECTORYNAME}/images/*.tar) ; do
+  # Load to local cache
+  astraImage=$(podman load --input ${astraImageFile} | sed 's/Loaded image(s): //')
+ 
+  # Remove path and keep imageName.
+  astraImageNoPath=$(echo ${astraImage} | sed 's:.*/::')
+ 
+  # Tag with local image repo.
+  podman tag ${astraImage} ${REGISTRY}/netapp/astra/${PACKAGENAME}/${PACKAGEVERSION}/${astraImageNoPath}
+ 
+  # Push to the local repo.
+  podman push ${REGISTRY}/netapp/astra/${PACKAGENAME}/${PACKAGEVERSION}/${astraImageNoPath}
+done
+----
+--
+
+====
+
+// end tabbed block
+
+
+
+== Set up namespace and secret for registries with auth requirements
+
+. Export the KUBECONFIG for the Astra Control Center host cluster: 
++
+[source,sh]
+----
+export KUBECONFIG=[file path] 
+----
+
+.  If you use a registry that requires authentication, you need to do the following:
+.. Create the `netapp-acc-operator` namespace:
++
+[source,sh]
+----
+kubectl create ns netapp-acc-operator
+----
++
+Response:
++
+----
+namespace/netapp-acc-operator created
+----
+
+.. Create a secret for the `netapp-acc-operator` namespace. Add Docker information and run the following command: 
++
+NOTE: The placeholder `your_registry_path` should match the location of the images that you uploaded earlier (for example, `[Registry_URL]/netapp/astra/astracc/22.08.1-26`).
++
+[source,sh]
+----
+kubectl create secret docker-registry astra-registry-cred -n netapp-acc-operator --docker-server=[your_registry_path] --docker-username=[username] --docker-password=[token]
+----
++
+Sample response:
++
+----
+secret/astra-registry-cred created
+----
++
+NOTE: If you delete the namespace after the secret is generated, you need to regenerate the secret for the namespace after the namespace is recreated.
+
+.. Create the `netapp-acc` (or custom named) namespace.
++
+[source,sh]
+----
+kubectl create ns [netapp-acc or custom namespace]
+----
++
+Sample response:
++
+----
+namespace/netapp-acc created
+----
+
+.. Create a secret for the `netapp-acc` (or custom named) namespace. Add Docker information and run the following command:
++
+[source,sh]
+----
+kubectl create secret docker-registry astra-registry-cred -n [netapp-acc or custom namespace] --docker-server=[your_registry_path] --docker-username=[username] --docker-password=[token]
+----
++
+Response
++
+----
+secret/astra-registry-cred created
+----
+
+.. [[substep_kubeconfig_secret]](Optional) If you want the cluster to be automatically managed by Astra Control Center after installation, make sure that you provide the kubeconfig as a secret within the Astra Control Center namespace you intend to deploy into using this command:
++
+[source,sh]
+----
+kubectl create secret generic [acc-kubeconfig-cred or custom secret name] --from-file=<path-to-your-kubeconfig> -n [netapp-acc or custom namespace]
+----
+
+== Install the Astra Control Center operator
+
+. Change the directory:
++
+[source,sh]
+----
+cd manifests
+----
+
+. Edit the Astra Control Center operator deployment YAML (`astra_control_center_operator_deploy.yaml`) to refer to your local registry and secret.
++
+[source,sh]
+----
+vim astra_control_center_operator_deploy.yaml
+----
++
+NOTE: An annotated sample YAML follows these steps.
+
+.. If you use a registry that requires authentication, replace the default line of `imagePullSecrets: []` with the following:
++
+[source,sh]
+----
+imagePullSecrets:
+- name: <astra-registry-cred>
+----
+
+.. Change `[your_registry_path]` for the `kube-rbac-proxy` image to the registry path where you pushed the images in a <<substep_image_local_registry_push,previous step>>.
+.. Change `[your_registry_path]` for the `acc-operator-controller-manager` image to the registry path where you pushed the images in a <<substep_image_local_registry_push,previous step>>.
+.. (For installations using Astra Data Store preview) See this known issue regarding https://docs.netapp.com/us-en/astra-data-store-2112/release-notes/known-issues.html#mongodb-deployment-with-default-liveness-probe-value-fails-with-pods-in-crash-loop[storage class provisioners and additional changes you will need to make to the YAML^].
++
+[subs=+quotes]
+----
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: acc-operator-controller-manager
+  namespace: netapp-acc-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --secure-listen-address=0.0.0.0:8443
+        - --upstream=http://127.0.0.1:8080/
+        - --logtostderr=true
+        - --v=10
+        *image: [your_registry_path]/kube-rbac-proxy:v4.8.0*
+        name: kube-rbac-proxy
+        ports:
+        - containerPort: 8443
+          name: https
+      - args:
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=127.0.0.1:8080
+        - --leader-elect
+        command:
+        - /manager
+        env:
+        - name: ACCOP_LOG_LEVEL
+          value: "2"
+        *image: [your_registry_path]/acc-operator:[version x.y.z]*
+        imagePullPolicy: IfNotPresent
+      *imagePullSecrets: []*
+----
+
+. Install the Astra Control Center operator:
++
+[source,sh]
+----
+kubectl apply -f astra_control_center_operator_deploy.yaml
+----
++
+Sample response:
++
+----
+namespace/netapp-acc-operator created
+customresourcedefinition.apiextensions.k8s.io/astracontrolcenters.astra.netapp.io created
+role.rbac.authorization.k8s.io/acc-operator-leader-election-role created
+clusterrole.rbac.authorization.k8s.io/acc-operator-manager-role created
+clusterrole.rbac.authorization.k8s.io/acc-operator-metrics-reader created
+clusterrole.rbac.authorization.k8s.io/acc-operator-proxy-role created
+rolebinding.rbac.authorization.k8s.io/acc-operator-leader-election-rolebinding created
+clusterrolebinding.rbac.authorization.k8s.io/acc-operator-manager-rolebinding created
+clusterrolebinding.rbac.authorization.k8s.io/acc-operator-proxy-rolebinding created
+configmap/acc-operator-manager-config created
+service/acc-operator-controller-manager-metrics-service created
+deployment.apps/acc-operator-controller-manager created
+----
+
+. Verify pods are running:
++
+[source,sh]
+----
+kubectl get pods -n netapp-acc-operator
+----
+
+== Configure Astra Control Center
+
+. Edit the Astra Control Center custom resource (CR) file (`astra_control_center_min.yaml`) to make account, autoSupport, registry, and other necessary configurations:
++
+NOTE: `astra_control_center_min.yaml` is the default CR and is suitable for most installations. Familiarize yourself with all link:../get-started/acc_cluster_cr_options.html[CR options and their potential values] to ensure you deploy Astra Control Center correctly for your environment. If additional customizations are required for your environment, you can use `astra_control_center.yaml` as an alternative CR.
+
++
+[source,sh]
+----
+vim astra_control_center_min.yaml
+----
++
+IMPORTANT: If you are using a registry that does not require authorization, you must delete the  `secret` line within `imageRegistry` or the installation will fail.
+
+.. Change `[your_registry_path]` to the registry path where you pushed the images in the previous step.
+.. Change the `accountName` string to the name you want to associate with the account.
+.. Change the `astraAddress` string to the FQDN you want to use in your browser to access Astra. Do not use `http://` or `https://` in the address. Copy this FQDN for use in a <<Log in to the Astra Control Center UI,later step>>.
+.. Change the `email` string to the default initial administrator address. Copy this email address for use in a <<Log in to the Astra Control Center UI,later step>>.
+.. Change `enrolled` for AutoSupport to `false` for sites without internet connectivity or retain `true` for connected sites.
+.. If you use an external cert-manager, add the following lines to `spec`:
++
+[source,sh]
+----
+spec:
+  crds:
+    externalCertManager: true
+----
+
+.. (Optional) Add a first name `firstName` and last name `lastName` of the user associated with the account. You can perform this step now or later within the UI.
+.. (Optional) Change the `storageClass` value to another Trident storageClass resource if required by your installation.
+.. (Optional) If you want the cluster to be automatically managed by Astra Control Center after installation and you have already <<substep_kubeconfig_secret,created the secret containing the kubeconfig for this cluster>>, provide the name of the secret by adding a new field to this YAML file called `astraKubeConfigSecret: "acc-kubeconfig-cred or custom secret name"`
+
+.. Complete one of the following steps:
++
+* *Other ingress controller (ingressType:Generic)*: This is the default action with Astra Control Center. After Astra Control Center is deployed, you will need to configure the ingress controller to expose Astra Control Center with a URL.
++
+The default Astra Control Center installation sets up its gateway (`service/traefik`) to be of the type `ClusterIP`. This default installation requires you to additionally set up a Kubernetes IngressController/Ingress to route traffic to it. If you want to use an ingress, see link:../get-started/install_acc.html#set-up-ingress-for-load-balancing[Set up ingress for load balancing].
+
+* *Service load balancer (ingressType:AccTraefik)*: If you don't want to install an IngressController or create an Ingress resource, set `ingressType` to `AccTraefik`.
++
+This deploys the Astra Control Center `traefik` gateway as a Kubernetes LoadBalancer type service.
++
+Astra Control Center uses a service of the type "LoadBalancer" (`svc/traefik` in the Astra Control Center namespace), and requires that it be assigned an accessible external IP address. If load balancers are permitted in your environment and you don’t already have one configured, you can use MetalLB or another external service load balancer to assign an external IP address to the service. In the internal DNS server configuration, you should point the chosen DNS name for Astra Control Center to the load-balanced IP address.
++
+NOTE: For details about the service type of "LoadBalancer" and ingress, see link:../get-started/requirements.html[Requirements].
+
++
+[subs=+quotes]
+----
+apiVersion: astra.netapp.io/v1
+kind: AstraControlCenter
+metadata:
+  name: astra
+spec:
+  *accountName: "Example"*
+  astraVersion: "ASTRA_VERSION"
+  *astraAddress: "astra.example.com"*
+  *astraKubeConfigSecret: "acc-kubeconfig-cred or custom secret name"*
+  *ingressType: "Generic"*
+  autoSupport:
+    *enrolled: true*
+  *email: "[admin@example.com]"*
+  *firstName: "SRE"*
+  *lastName: "Admin"*
+  imageRegistry:
+    *name: "[your_registry_path]"*
+    *secret: "astra-registry-cred"*
+  *storageClass: "ontap-gold"*
+----
+
+
+
+== Complete Astra Control Center and operator installation
+
+. If you didn't already do so in a previous step, create the `netapp-acc` (or custom) namespace:
++
+[source,sh]
+----
+kubectl create ns [netapp-acc or custom namespace]
+----
++
+Sample response:
++
+----
+namespace/netapp-acc created
+----
+
+. Install Astra Control Center in the `netapp-acc` (or your custom) namespace:
++
+[source,sh]
+----
+kubectl apply -f astra_control_center_min.yaml -n [netapp-acc or custom namespace]
+----
++
+Sample response:
++
+----
+astracontrolcenter.astra.netapp.io/astra created
+----
+
+== Verify system status
+
+NOTE: If you prefer to use OpenShift, you can use comparable oc commands for verification steps.
+
+. Verify that all system components installed successfully.
++
+[source,sh]
+----
+kubectl get pods -n [netapp-acc or custom namespace]
+----
++
+Each pod should have a status of `Running`. It may take several minutes before the system pods are deployed.
++
+.Sample response
+[%collapsible]
+====
+[subs=+quotes]
+----
+NAME                                     READY  STATUS   RESTARTS AGE
+acc-helm-repo-6b44d68d94-d8m55           1/1    Running  0        13m
+activity-78f99ddf8-hltct                 1/1    Running  0        10m
+api-token-authentication-457nl           1/1    Running  0        9m28s
+api-token-authentication-dgwsz           1/1    Running  0        9m28s
+api-token-authentication-hmqqc           1/1    Running  0        9m28s
+asup-75fd554dc6-m6qzh                    1/1    Running  0        9m38s
+authentication-6779b4c85d-92gds          1/1    Running  0        8m11s
+bucketservice-7cc767f8f8-lqwr8           1/1    Running  0        9m31s
+certificates-549fd5d6cb-5kmd6            1/1    Running  0        9m56s
+certificates-549fd5d6cb-bkjh9            1/1    Running  0        9m56s
+cloud-extension-7bcb7948b-hn8h2          1/1    Running  0        10m
+cloud-insights-service-56ccf86647-fgg69  1/1    Running  0        9m46s
+composite-compute-677685b9bb-7vgsf       1/1    Running  0        10m
+composite-volume-657d6c5585-dnq79        1/1    Running  0        9m49s
+credentials-755fd867c8-vrlmt             1/1    Running  0        11m
+entitlement-86495cdf5b-nwhh2             1/1    Running  2        10m
+features-5684fb8b56-8d6s8                1/1    Running  0        10m
+fluent-bit-ds-rhx7v                      1/1    Running  0        7m48s
+fluent-bit-ds-rjms4                      1/1    Running  0        7m48s
+fluent-bit-ds-zf5ph                      1/1    Running  0        7m48s
+graphql-server-66d895f544-w6hjd          1/1    Running  0        3m29s
+identity-744df448d5-rlcmm                1/1    Running  0        10m
+influxdb2-0                              1/1    Running  0        13m
+keycloak-operator-75c965cc54-z7csw       1/1    Running  0        8m16s
+krakend-798d6df96f-9z2sk                 1/1    Running  0        3m26s
+license-5fb7d75765-f8mjg                 1/1    Running  0        9m50s
+login-ui-7d5b7df85d-l2s7s                1/1    Running  0        3m20s
+loki-0                                   1/1    Running  0        13m
+metrics-facade-599b9d7fcc-gtmgl          1/1    Running  0        9m40s
+monitoring-operator-67cc74f844-cdplp     2/2    Running  0        8m11s
+nats-0                                   1/1    Running  0        13m
+nats-1                                   1/1    Running  0        13m
+nats-2                                   1/1    Running  0        12m
+nautilus-769f5b74cd-k5jxm                1/1    Running  0        9m42s
+nautilus-769f5b74cd-kd9gd                1/1    Running  0        8m59s
+openapi-84f6ccd8ff-76kvp                 1/1    Running  0        9m34s
+packages-6f59fc67dc-4g2f5                1/1    Running  0        9m52s
+polaris-consul-consul-server-0           1/1    Running  0        13m
+polaris-consul-consul-server-1           1/1    Running  0        13m
+polaris-consul-consul-server-2           1/1    Running  0        13m
+polaris-keycloak-0                       1/1    Running  0        8m7s
+polaris-keycloak-1                       1/1    Running  0        5m49s
+polaris-keycloak-2                       1/1    Running  0        5m15s
+polaris-keycloak-db-0                    1/1    Running  0        8m6s
+polaris-keycloak-db-1                    1/1    Running  0        5m49s
+polaris-keycloak-db-2                    1/1    Running  0        4m57s
+polaris-mongodb-0                        2/2    Running  0        13m
+polaris-mongodb-1                        2/2    Running  0        12m
+polaris-mongodb-2                        2/2    Running  0        12m
+polaris-ui-565f56bf7b-zwr8b              1/1    Running  0        3m19s
+polaris-vault-0                          1/1    Running  0        13m
+polaris-vault-1                          1/1    Running  0        13m
+polaris-vault-2                          1/1    Running  0        13m
+public-metrics-6d86d66444-2wbzl          1/1    Running  0        9m30s
+storage-backend-metrics-77c5d98dcd-dbhg5 1/1    Running  0        9m44s
+storage-provider-78c885f57c-6zcv4        1/1    Running  0        9m36s
+telegraf-ds-2l2m9                        1/1    Running  0        7m48s
+telegraf-ds-qfzgh                        1/1    Running  0        7m48s
+telegraf-ds-shrms                        1/1    Running  0        7m48s
+telegraf-rs-bjpkt                        1/1    Running  0        7m48s
+telemetry-service-6684696c64-qzfdf       1/1    Running  0        10m
+tenancy-6596b6c54d-vmpsm                 1/1    Running  0        10m
+traefik-7489dc59f9-6mnst                 1/1    Running  0        3m19s
+traefik-7489dc59f9-xrkgg                 1/1    Running  0        3m4s
+trident-svc-6c8dc458f5-jswcl             1/1    Running  0        10m
+vault-controller-6b954f9b76-gz9nm        1/1    Running  0        11m
+----
+====
+// End snippet
+
+. (Optional) To ensure the installation is completed, you can watch the `acc-operator` logs using the following command.
++
+[source,sh]
+----
+kubectl logs deploy/acc-operator-controller-manager -n netapp-acc-operator -c manager -f
+----
++
+NOTE: `accHost` cluster registration is one of the last operations, and if it fails it will not cause deployment to fail. In the event of a cluster registration failure indicated in the logs, you can attempt registration again through the add cluster workflow link:../get-started/setup_overview.html#add-cluster[in the UI] or API.
+
+. When all the pods are running, verify that the installation was successful (`READY` is `True`) and get the one-time password you will use when you log in to Astra Control Center: 
++
+[source,sh]
+----
+kubectl get AstraControlCenter -n netapp-acc
+----
++
+Response:
++
+----
+NAME    UUID                                      VERSION     ADDRESS         READY
+astra   ACC-9aa5fdae-4214-4cb7-9976-5d8b4c0ce27f  22.08.1-26  10.111.111.111  True
+----
++
+IMPORTANT: Copy the UUID value. The password is `ACC-` followed by the UUID value (`ACC-[UUID]` or, in this example, `ACC-9aa5fdae-4214-4cb7-9976-5d8b4c0ce27f`).
+
+== Set up ingress for load balancing
+
+You can set up a Kubernetes ingress controller that manages external access to services, such as load balancing in a cluster.
+
+This procedure explains how to set up an ingress controller (`ingressType:Generic`). This is the default action with Astra Control Center. After Astra Control Center is deployed, you will need to configure the ingress controller to expose Astra Control Center with a URL.
+
+NOTE: If you don't want to set up an ingress controller, you can set `ingressType:AccTraefik)`. Astra Control Center uses a service of the type "LoadBalancer" (`svc/traefik` in the Astra Control Center namespace), and requires that it be assigned an accessible external IP address. If load balancers are permitted in your environment and you don’t already have one configured, you can use MetalLB or another external service load balancer to assign an external IP address to the service. In the internal DNS server configuration, you should point the chosen DNS name for Astra Control Center to the load-balanced IP address. For details about the service type of "LoadBalancer" and ingress, see link:../get-started/requirements.html[Requirements].
+
+The steps differ depending on the type of ingress controller you use:
+
+* Istio ingress
+* Nginx ingress controller
+* OpenShift ingress controller
+
+.What you'll need
+
+* The required https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/[ingress controller] should already be deployed.
+* The https://kubernetes.io/docs/concepts/services-networking/ingress/#ingress-class[ingress class] corresponding to the ingress controller should already be created.
+* You are using Kubernetes versions between and including v1.19 and v1.22.
+
+.Steps for Istio ingress
+
+. Configure Istio ingress.
++
+NOTE: This procedure assumes that Istio is deployed using the "default" configuration profile. 
+
+. Gather or create the desired certificate and private key file for the Ingress Gateway.
++
+You can use a CA-signed or self-signed certificate. The common name must be the Astra address (FQDN).
++
+Sample command: 
++
+[source,sh]
+----
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 
+-keyout tls.key -out tls.crt
+----
+
+. Create a secret `tls secret name` of type `kubernetes.io/tls` for a TLS private key and certificate in the `istio-system namespace` as described in TLS secrets.
++
+Sample command: 
++
+[source,sh]
+----
+kubectl create secret tls [tls secret name] 
+--key="tls.key"
+--cert="tls.crt" -n istio-system
+----
++
+TIP: The name of the secret should match the `spec.tls.secretName` provided in `istio-ingress.yaml` file.
+
+
+. Deploy an ingress resource in `netapp-acc` (or custom-named) namespace using either the v1beta1 (deprecated in Kubernetes version less than or 1.22) or v1 resource type for either a deprecated or a new schema:
++
+Output:
++
+----
+apiVersion: networking.k8s.io/v1beta1
+kind: IngressClass
+metadata:
+  name: istio
+spec:
+  controller: istio.io/ingress-controller
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: ingress
+  namespace: istio-system
+spec:
+  ingressClassName: istio
+  tls:
+  - hosts:
+    - <ACC addess>
+    secretName: [tls secret name]
+  rules:
+  - host: [ACC addess]
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          serviceName: traefik
+          servicePort: 80
+----
+
++
+For the v1 new schema, follow this sample:
++
+[source,sh]
+----
+kubectl apply -f istio-Ingress.yaml
+----
++
+Output:
++
+----
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: istio
+spec:
+  controller: istio.io/ingress-controller
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress
+  namespace: istio-system
+spec:
+  ingressClassName: istio
+  tls:
+  - hosts:
+    - <ACC addess>
+    secretName: [tls secret name]
+  rules:
+  - host: [ACC addess]
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: traefik
+            port:
+              number: 80
+----
+
+. Deploy Astra Control Center as usual.
+
+. Check the status of the ingress:
++
+[source,sh]
+----
+kubectl get ingress -n netapp-acc
+----
++
+Response:
++
+----
+NAME    CLASS HOSTS             ADDRESS         PORTS   AGE
+ingress istio astra.example.com 172.16.103.248  80, 443 1h
+----
+
+
+.Steps for Nginx ingress controller
+
+. Create a secret of type http://kubernetes.io/tls[`kubernetes.io/tls`] for a TLS private key and certificate in `netapp-acc` (or custom-named) namespace as described in https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets[TLS secrets].
+. Deploy an ingress resource in `netapp-acc` (or custom-named) namespace using either the `v1beta1` (deprecated in Kubernetes version less than or 1.22) or `v1` resource type for either a deprecated or a new schema:
+.. For a `v1beta1` deprecated schema, follow this sample:
++
+[source,yaml]
+----
+apiVersion: extensions/v1beta1
+Kind: IngressClass
+metadata:
+  name: ingress-acc
+  namespace: [netapp-acc or custom namespace]
+  annotations:
+    kubernetes.io/ingress.class: [class name for nginx controller]
+spec:
+  tls:
+  - hosts:
+    - <ACC address>
+    secretName: [tls secret name]
+  rules:
+  - host: [ACC address]
+    http:
+      paths:
+      - backend:
+        serviceName: traefik
+        servicePort: 80
+        pathType: ImplementationSpecific
+----
+
+.. For the `v1` new schema, follow this sample:
++
+[source,yaml]
+----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: netapp-acc-ingress
+  namespace: [netapp-acc or custom namespace]
+spec:
+  ingressClassName: [class name for nginx controller]
+  tls:
+  - hosts:
+    - <ACC address>
+    secretName: [tls secret name]
+  rules:
+  - host: <ACC addess>
+    http:
+      paths:
+        - path:
+          backend:
+            service:
+              name: traefik
+              port:
+                number: 80
+          pathType: ImplementationSpecific
+----
+
+.Steps for OpenShift ingress controller
+
+. Procure your certificate and get the key, certificate, and CA files ready for use by the OpenShift route.
+. Create the OpenShift route:
++
+[source,sh]
+----
+oc create route edge --service=traefik
+--port=web -n [netapp-acc or custom namespace]
+--insecure-policy=Redirect --hostname=<ACC address>
+--cert=cert.pem --key=key.pem
+----
+
+
+== Log in to the Astra Control Center UI
+
+After installing Astra Control Center, you will change the password for the default administrator and log in to the Astra Control Center UI dashboard.
+
+.Steps
+. In a browser, enter the FQDN you used in the `astraAddress` in the  `astra_control_center_min.yaml` CR when <<Install Astra Control Center,you installed Astra Control Center>>.
+. Accept the self-signed certificates when prompted.
++
+NOTE: You can create a custom certificate after login.
+
+. At the Astra Control Center login page, enter the value you used for `email` in `astra_control_center_min.yaml` CR when <<Install Astra Control Center,you installed Astra Control Center>>, followed by the one-time password (`ACC-[UUID]`).
++
+NOTE: If you enter an incorrect password three times, the admin account will be locked for 15 minutes.
+
+. Select *Login*.
+. Change the password when prompted.
++
+NOTE: If this is your first login and you forget the password and no other administrative user accounts have yet been created, contact NetApp Support for password recovery assistance.
+
+. (Optional) Remove the existing self-signed TLS certificate and replace it with a link:../get-started/add-custom-tls-certificate.html[custom TLS certificate signed by a Certificate Authority (CA)].
+
+== Troubleshoot the installation
+
+If any of the services are in `Error` status, you can inspect the logs. Look for API response codes in the 400 to 500 range. Those indicate the place where a failure happened.
+
+.Steps
+
+. To inspect the Astra Control Center operator logs, enter the following:
++
+[source,sh]
+----
+kubectl logs --follow -n netapp-acc-operator $(kubectl get pods -n netapp-acc-operator -o name) -c manager
+----
+
+== What's next
+
+Complete the deployment by performing link:setup_overview.html[setup tasks].
