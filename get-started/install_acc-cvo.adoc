@@ -115,7 +115,7 @@ Follow the AWS documentation to complete the following steps. See https://docs.o
 
 . Create an AWS virtual network.
 . Review the EC2 compute instances. This can be a bare metal server or VMs in AWS.
-. If the instance type does not already match the Astra minimum resource requirements for master and worker nodes, change the instance type in AWS to meet the Astra requirements.  See link:../requirements.html[Astra Control Center requirements].
+. If the instance type does not already match the Astra minimum resource requirements for master and worker nodes, change the instance type in AWS to meet the Astra requirements.  See link:../get-started/requirements.html[Astra Control Center requirements].
 . Create at least one AWS S3 bucket to store your backups.
 . Create an AWS Elastic Container Registry (ECR) to host all the ACC images.
 +
@@ -420,11 +420,7 @@ Each of these steps is explained in more detail below.
 === Install a RedHat OpenShift cluster on Azure
 The first step is to install a RedHat OpenShift cluster on Azure.
 
-For installation instructions, see the following:
-
-* https://docs.openshift.com/container-platform/4.8/installing/installing_aws/installing-azure-default.html[Installing OpenShift cluster on Azure^].
-
-* https://docs.openshift.com/container-platform/4.8/installing/installing_azure/installing-azure-account.html#installing-azure-account[Installing an Azure account^].
+For installation instructions, see RedHat documentation on https://docs.openshift.com/container-platform[installing OpenShift cluster on Azure^] and https://docs.openshift.com/container-platform[installing an Azure account^].
 
 
 
